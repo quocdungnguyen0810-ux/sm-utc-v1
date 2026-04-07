@@ -1,538 +1,508 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
-import 'katex/dist/katex.min.css'
-import { CHAPTERS } from './data.js'
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+import { CHAPTERS } from "./data/chapters.js";
 
-// ── helpers ────────────────────────────────────────────────────────────────
-const flatLessons = CHAPTERS.map(ch => ({ id: ch.id, title: ch.title, subtitle: ch.subtitle, icon: ch.icon }))
+const ALL_SECTIONS = CHAPTERS.flatMap(ch =>
+  ch.sections.map(s => ({ ...s, chapterId: ch.id, chapterTitle: ch.title, chapterIcon: ch.icon }))
+);
 
-function useDebounce(val, ms) {
-  const [dv, setDv] = useState(val)
-  useEffect(() => { const t = setTimeout(() => setDv(val), ms); return () => clearTimeout(t) }, [val, ms])
-  return dv
-}
+const SvgIcon = ({ d, size = 16, viewBox = "0 0 24 24", fill = "none", stroke = "currentColor", sw = "2" }) => (
+  <svg width={size} height={size} viewBox={viewBox} fill={fill} stroke={stroke} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
+    {Array.isArray(d) ? d.map((path, i) => <path key={i} d={path}/>) : <path d={d}/>}
+  </svg>
+);
 
-// ── QUIZ ──────────────────────────────────────────────────────────────────
+const Icons = {
+  menu: () => <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
+  close: () => <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  search: (s=14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  sun: () => <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>,
+  moon: () => <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
+  chevronR: (s=13) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>,
+  arrowL: () => <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>,
+  arrowR: () => <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
+  check: (s=12) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>,
+  x: (s=12) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  book: () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+  link: (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
+  db: (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>,
+  quiz: () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  refresh: () => <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>,
+};
+
+// ─── Quiz ────────────────────────────────────────────────────────────────────
 function Quiz({ questions }) {
-  const [sel, setSel] = useState({})
-  const [done, setDone] = useState(false)
-  const reset = () => { setSel({}); setDone(false) }
-  const score = done ? questions.reduce((a, q, i) => a + (sel[i] === q.ans ? 1 : 0), 0) : 0
-  const pct = done ? Math.round(score / questions.length * 100) : 0
+  const [answers, setAnswers] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const [shown, setShown] = useState({});
+  const score = useMemo(() => !submitted ? 0 :
+    questions.reduce((a, q, i) => a + (answers[i] === q.ans ? 1 : 0), 0),
+    [submitted, answers, questions]);
+  const reset = () => { setAnswers({}); setSubmitted(false); setShown({}); };
 
   return (
     <div className="quiz-wrap">
-      <div className="quiz-top">
-        <span className="quiz-icon">🎯</span>
-        <span>Kiểm tra kiến thức</span>
+      <div className="quiz-head">
+        <Icons.quiz/><span>Kiểm tra kiến thức</span>
         <span className="quiz-count">{questions.length} câu</span>
       </div>
-
       <div className="quiz-body">
         {questions.map((q, i) => {
-          const picked = sel[i]
-          const correct = done && picked === q.ans
-          const wrong = done && picked !== undefined && picked !== q.ans
+          const ok = submitted && answers[i] === q.ans;
+          const fail = submitted && answers[i] !== undefined && answers[i] !== q.ans;
           return (
-            <div key={i} className={`q-item${correct ? ' q-correct' : wrong ? ' q-wrong' : ''}`}>
-              <p className="q-text"><span className="q-num">{i + 1}</span>{q.q}</p>
+            <div key={i} className={`quiz-q${ok ? ' q-ok' : fail ? ' q-fail' : ''}`}>
+              <div className="q-meta">
+                <span className="q-num">Câu {i+1}</span>
+                {submitted && <span className={`q-badge ${ok ? 'b-ok' : 'b-fail'}`}>
+                  {ok ? <><Icons.check/> Đúng</> : <><Icons.x/> Sai</>}
+                </span>}
+              </div>
+              <div className="q-text">
+                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{q.q}</ReactMarkdown>
+              </div>
               <div className="q-opts">
                 {q.options.map((opt, j) => (
-                  <label key={j} className={`q-opt${sel[i] === j ? ' q-picked' : ''}${done && j === q.ans ? ' q-ans' : ''}`}>
-                    <input type="radio" name={`q${i}`} disabled={done} checked={sel[i] === j} onChange={() => setSel(p => ({ ...p, [i]: j }))} />
-                    <span className="q-opt-mark">{String.fromCharCode(65 + j)}</span>
-                    <span>{opt}</span>
+                  <label key={j} className={`q-opt${answers[i]===j?' sel':''}${submitted&&j===q.ans?' ok':''}${submitted&&answers[i]===j&&j!==q.ans?' fail':''}`}>
+                    <input type="radio" name={`q${i}-${q.q.slice(0,8)}`} disabled={submitted}
+                      checked={answers[i]===j} onChange={() => !submitted && setAnswers(p=>({...p,[i]:j}))}/>
+                    <span className="opt-dot">
+                      {submitted&&j===q.ans ? <Icons.check s={12}/> : submitted&&answers[i]===j&&j!==q.ans ? <Icons.x s={12}/> : String.fromCharCode(65+j)}
+                    </span>
+                    <span className="opt-label"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{opt}</ReactMarkdown></span>
                   </label>
                 ))}
               </div>
-              {done && (
-                <div className={`q-explain${correct ? ' q-explain-ok' : ' q-explain-err'}`}>
-                  {correct ? '✅' : '❌'} <strong>{correct ? 'Đúng!' : `Sai — Đáp án: ${q.options[q.ans]}`}</strong> — {q.explain}
-                </div>
-              )}
+              {submitted && <button className="explain-toggle" onClick={()=>setShown(p=>({...p,[i]:!p[i]}))}>
+                {shown[i]?'▲ Ẩn':'▼ Xem giải thích'}
+              </button>}
+              {submitted && shown[i] && <div className="q-explain">
+                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{q.explain}</ReactMarkdown>
+              </div>}
             </div>
-          )
+          );
         })}
       </div>
-
       <div className="quiz-foot">
-        {!done ? (
-          <button className="btn-submit" disabled={Object.keys(sel).length < questions.length} onClick={() => setDone(true)}>
-            Nộp bài ✓
+        {!submitted ? (
+          <button className="btn-nop" disabled={Object.keys(answers).length<questions.length}
+            onClick={()=>setSubmitted(true)}>
+            Nộp bài {Object.keys(answers).length<questions.length&&`(còn ${questions.length-Object.keys(answers).length} câu)`}
           </button>
         ) : (
           <div className="quiz-result">
-            <div className="result-bar-wrap">
-              <div className="result-bar" style={{ width: `${pct}%`, background: pct >= 70 ? 'var(--accent)' : pct >= 50 ? '#f59e0b' : '#ef4444' }} />
-            </div>
-            <div className="result-info">
-              <span className="result-score">{score}/{questions.length}</span>
-              <span className="result-pct">{pct >= 80 ? '🎉 Xuất sắc!' : pct >= 60 ? '👍 Khá tốt!' : '📖 Ôn lại nhé!'}</span>
-              <button className="btn-reset" onClick={reset}>↺ Làm lại</button>
-            </div>
+            <div className="res-score"><span className="rs-n">{score}</span><span className="rs-s">/</span><span className="rs-t">{questions.length}</span></div>
+            <div className="res-msg">{score===questions.length?'🎉 Xuất sắc!':score>=Math.ceil(questions.length*0.7)?'👍 Khá tốt!':score>=Math.ceil(questions.length*0.5)?'📖 Ôn lại nhé!':'📚 Đọc lại bài!'}</div>
+            <button className="btn-reset" onClick={reset}><Icons.refresh/> Làm lại</button>
           </div>
         )}
       </div>
     </div>
-  )
+  );
 }
 
-// ── REFERENCES ────────────────────────────────────────────────────────────
+// ─── References ──────────────────────────────────────────────────────────────
+const RICONS = { standard:'📋', book:'📚', guide:'📖', tool:'🔧', map:'🗺️', data:'📊' };
 function References({ refs }) {
-  if (!refs?.length) return null
-  const groups = { data: refs.filter(r => r.type === 'data'), standard: refs.filter(r => r.type === 'standard'), link: refs.filter(r => r.type === 'link') }
-  const Label = ({ type }) => ({
-    data: <span className="ref-badge ref-data">📊 Số liệu</span>,
-    standard: <span className="ref-badge ref-std">📋 Tiêu chuẩn</span>,
-    link: <span className="ref-badge ref-link">🔗 Liên kết</span>
-  }[type])
-
   return (
-    <div className="refs-wrap">
-      <h3 className="refs-title">📚 Tài liệu Tham khảo</h3>
-      {groups.data.length > 0 && (
-        <div className="ref-group">
-          <div className="ref-group-title">Số liệu Dự án Pimpama</div>
-          {groups.data.map((r, i) => (
-            <div key={i} className="ref-item">
-              <Label type="data" />
-              <div className="ref-content">
-                <strong>{r.label}</strong>
-                {r.value && <span className="ref-value">{r.value}</span>}
-                <p>{r.desc}</p>
-              </div>
+    <div className="refs-body">
+      <section className="ref-section">
+        <h3 className="ref-h"><Icons.link/> Tài liệu tham khảo</h3>
+        {refs.map((r,i)=>(
+          <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" className="ref-row">
+            <span className="ref-ic">{RICONS[r.type]||'🔗'}</span>
+            <span className="ref-info"><span className="ref-name">{r.title}</span><span className="ref-cat">{r.type}</span></span>
+            <span className="ref-ext">↗</span>
+          </a>
+        ))}
+      </section>
+      <section className="ref-section">
+        <h3 className="ref-h"><Icons.db/> Số liệu dự án Pimpama</h3>
+        <div className="data-grid">
+          {[
+            ["Vị trí","Pimpama Riverside, Gold Coast, QLD, Australia"],
+            ["Năm khảo sát","2009"],
+            ["Số hố khoan","10 hố (BH1 – BH10)"],
+            ["Chiều sâu khoan","≤ 12 m"],
+            ["Loại đất chính","Sét pha bùn phù sa (CH – USCS)"],
+            ["LL (sét mềm)","62 – 74 %"],
+            ["PI","30 – 42 %"],
+            ["Độ ẩm tự nhiên w","55 – 80 %"],
+            ["γ_sat (sét mềm)","15.0 – 16.0 kN/m³"],
+            ["c_u (sét mềm)","5 – 15 kPa"],
+            ["C_c (oedometer)","0.55 – 0.75"],
+            ["c_v","1.0 – 2.5 m²/yr"],
+          ].map(([l,v],i)=>(
+            <div key={i} className="data-card">
+              <span className="data-lbl">{l}</span>
+              <span className="data-val">{v}</span>
             </div>
           ))}
         </div>
-      )}
-      {groups.standard.length > 0 && (
-        <div className="ref-group">
-          <div className="ref-group-title">Tiêu chuẩn thí nghiệm</div>
-          {groups.standard.map((r, i) => (
-            <div key={i} className="ref-item">
-              <Label type="standard" />
-              <div className="ref-content"><strong>{r.label}</strong><p>{r.desc}</p></div>
-            </div>
+      </section>
+      <section className="ref-section">
+        <h3 className="ref-h">🌐 Link hữu ích</h3>
+        <div className="link-grid">
+          {[
+            ["GeoTechData.info","Cơ sở dữ liệu địa kỹ thuật","https://www.geotechdata.info"],
+            ["ASTM International","Tiêu chuẩn thí nghiệm","https://www.astm.org"],
+            ["GeoSlope","Phần mềm phân tích ổn định","https://www.geoslope.com"],
+            ["GeoTechTools","Công cụ thiết kế địa kỹ thuật","https://www.geotechtools.org"],
+            ["Standards Australia","Tiêu chuẩn AS 1726","https://www.standards.org.au"],
+            ["Routledge Textbooks","Sách giáo trình gốc","https://routledgetextbooks.com"],
+          ].map(([n,d,u],i)=>(
+            <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="link-card">
+              <span className="lc-name">{n}</span>
+              <span className="lc-desc">{d}</span>
+            </a>
           ))}
         </div>
-      )}
-      {groups.link.length > 0 && (
-        <div className="ref-group">
-          <div className="ref-group-title">Liên kết hữu ích</div>
-          {groups.link.map((r, i) => (
-            <div key={i} className="ref-item">
-              <Label type="link" />
-              <div className="ref-content">
-                {r.url ? <a href={r.url} target="_blank" rel="noreferrer"><strong>{r.label}</strong></a> : <strong>{r.label}</strong>}
-                <p>{r.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      </section>
     </div>
-  )
+  );
 }
 
-// ── MAIN APP ──────────────────────────────────────────────────────────────
+// ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [dark, setDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
-  const [activeId, setActiveId] = useState(1)
-  const [tab, setTab] = useState('content') // content | quiz | refs
-  const [sideOpen, setSideOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const contentRef = useRef(null)
-  const dSearch = useDebounce(search, 200)
+  const [dark, setDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState({ 1: true });
+  const [secId, setSecId] = useState("1-1");
+  const [tab, setTab] = useState("content");
+  const [search, setSearch] = useState("");
+  const ref = useRef(null);
 
-  const chapter = useMemo(() => CHAPTERS.find(c => c.id === activeId), [activeId])
-
-  const searchResults = useMemo(() => {
-    if (!dSearch.trim()) return []
-    const q = dSearch.toLowerCase()
-    return CHAPTERS.filter(c => c.title.toLowerCase().includes(q) || c.subtitle.toLowerCase().includes(q) || c.content.toLowerCase().includes(q))
-  }, [dSearch])
+  const section = useMemo(() => ALL_SECTIONS.find(s=>s.id===secId), [secId]);
+  const chapter = useMemo(() => CHAPTERS.find(c=>c.id===section?.chapterId), [section]);
+  const idx = useMemo(() => ALL_SECTIONS.findIndex(s=>s.id===secId), [secId]);
 
   const go = useCallback((id) => {
-    setActiveId(id); setTab('content'); setSideOpen(false)
-    setTimeout(() => contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' }), 50)
-  }, [])
+    setSecId(id); setTab("content"); setOpen(false); setSearch("");
+    const chId = ALL_SECTIONS.find(s=>s.id===id)?.chapterId;
+    if (chId) setExpanded(p=>({...p,[chId]:true}));
+    ref.current?.scrollTo({top:0,behavior:"smooth"});
+  }, []);
 
-  const prev = activeId > 1 ? CHAPTERS.find(c => c.id === activeId - 1) : null
-  const next = activeId < CHAPTERS.length ? CHAPTERS.find(c => c.id === activeId + 1) : null
+  const results = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.toLowerCase();
+    return ALL_SECTIONS.filter(s =>
+      s.title.toLowerCase().includes(q) || s.chapterTitle.toLowerCase().includes(q)
+    ).slice(0,8);
+  }, [search]);
 
   return (
-    <>
+    <div className={`app ${dark?'dark':'light'}`}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-        html,body,#root{height:100%;font-size:16px}
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body,#root{height:100%}
+.light{
+  --bg:#f5f1eb;--bg2:#ece6db;--surf:#fff;--surf2:#f9f5ef;
+  --sb:#1b1916;--sb2:#232018;--sbh:rgba(255,255,255,0.05);
+  --sbt:#e4ddd2;--sbm:#706a62;--sba:rgba(196,138,56,0.14);--sbac:#c48a38;
+  --acc:#8b5015;--acc2:#c48a38;--accl:rgba(139,80,21,0.07);
+  --tx:#18140e;--tx2:#46392c;--tx3:#7a6d5e;
+  --bd:#d9d0c2;--bd2:#ece6db;
+  --ok:#1a6b3a;--okb:rgba(26,107,58,0.09);
+  --err:#991515;--errb:rgba(153,21,21,0.09);
+  --sh:0 2px 16px rgba(60,40,10,.1);--shl:0 8px 40px rgba(60,40,10,.15);
+}
+.dark{
+  --bg:#0c0b09;--bg2:#131109;--surf:#181510;--surf2:#1d1a14;
+  --sb:#090807;--sb2:#111009;--sbh:rgba(255,255,255,0.04);
+  --sbt:#d0c9be;--sbm:#565048;--sba:rgba(196,138,56,0.11);--sbac:#d4a050;
+  --acc:#d4a050;--acc2:#b8813a;--accl:rgba(212,160,80,0.07);
+  --tx:#e4ddd2;--tx2:#aa9f90;--tx3:#655d52;
+  --bd:#28241c;--bd2:#201d15;
+  --ok:#38a860;--okb:rgba(56,168,96,0.1);
+  --err:#df5050;--errb:rgba(223,80,80,0.1);
+  --sh:0 2px 16px rgba(0,0,0,.4);--shl:0 8px 40px rgba(0,0,0,.55);
+}
+.app{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 
-        :root{
-          --bg:#f6f4ef;
-          --bg2:#edeae2;
-          --surface:#ffffff;
-          --side-bg:#1c1917;
-          --side-text:#e7e5e0;
-          --side-muted:#a8a29e;
-          --side-hover:rgba(255,255,255,0.06);
-          --side-active:rgba(214,165,90,0.15);
-          --accent:#b5621e;
-          --accent-light:#f0c070;
-          --accent2:#8b4513;
-          --text:#1c1917;
-          --text2:#57534e;
-          --text3:#a8a29e;
-          --border:#ddd8d0;
-          --border2:#c9c3b8;
-          --card:#ffffff;
-          --math-bg:#fdf8ef;
-          --code-bg:#f5f1e8;
-          --correct:#166534;
-          --correct-bg:#dcfce7;
-          --wrong:#991b1b;
-          --wrong-bg:#fee2e2;
-          --shadow:0 1px 3px rgba(0,0,0,0.08),0 4px 12px rgba(0,0,0,0.06);
-          --shadow-lg:0 4px 20px rgba(0,0,0,0.12);
-        }
-        .dark{
-          --bg:#111110;
-          --bg2:#1c1917;
-          --surface:#1c1917;
-          --side-bg:#0c0c0b;
-          --side-text:#e7e5e0;
-          --side-muted:#78716c;
-          --side-hover:rgba(255,255,255,0.04);
-          --side-active:rgba(214,165,90,0.12);
-          --accent:#d4855a;
-          --accent-light:#f0c070;
-          --accent2:#b86940;
-          --text:#e7e5e0;
-          --text2:#a8a29e;
-          --text3:#57534e;
-          --border:#292524;
-          --border2:#44403c;
-          --card:#1c1917;
-          --math-bg:#1c1917;
-          --code-bg:#252220;
-          --correct:#16a34a;
-          --correct-bg:#14532d22;
-          --wrong:#ef4444;
-          --wrong-bg:#7f1d1d22;
-          --shadow:0 1px 3px rgba(0,0,0,0.3),0 4px 12px rgba(0,0,0,0.2);
-          --shadow-lg:0 4px 20px rgba(0,0,0,0.4);
-        }
+/* TOP */
+.top{height:52px;background:var(--sb);border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;padding:0 12px;gap:8px;flex-shrink:0;z-index:200;position:relative}
+.t-logo{font-family:'Crimson Pro',serif;font-size:17px;font-weight:700;color:var(--sbac);letter-spacing:.02em;white-space:nowrap;flex-shrink:0}
+.t-logo em{color:var(--sbm);font-style:normal;font-weight:400;font-size:13px;margin-left:5px}
+.t-sp{flex:1}
+.t-sw{flex:1;max-width:300px;position:relative}
+.t-si{width:100%;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:7px 12px 7px 34px;color:var(--sbt);font-size:13px;outline:none;font-family:inherit;transition:border .15s}
+.t-si:focus{border-color:var(--sbac);background:rgba(255,255,255,0.1)}
+.t-si::placeholder{color:var(--sbm)}
+.t-sic{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--sbm);pointer-events:none}
+.sd{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--surf);border:1px solid var(--bd);border-radius:10px;box-shadow:var(--shl);z-index:500;overflow:hidden}
+.sdi{padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--bd2);transition:background .12s}
+.sdi:hover{background:var(--bg2)}.sdi:last-child{border-bottom:none}
+.sdi-ch{font-size:10px;font-weight:700;color:var(--acc2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
+.sdi-s{font-size:13px;color:var(--tx)}
+.sd-empty{padding:12px 14px;font-size:13px;color:var(--tx3)}
+.t-btn{width:34px;height:34px;border-radius:8px;background:rgba(255,255,255,0.07);border:none;cursor:pointer;color:var(--sbt);display:flex;align-items:center;justify-content:center;transition:background .15s;flex-shrink:0}
+.t-btn:hover{background:rgba(255,255,255,0.13)}
+.mb{display:none}
+@media(max-width:900px){.mb{display:flex}}
 
-        body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);transition:background 0.2s,color 0.2s}
+/* LAYOUT */
+.lay{flex:1;display:flex;overflow:hidden;position:relative}
+.ov{display:none;position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:90;backdrop-filter:blur(2px)}
+.ov.show{display:block}
 
-        /* ── LAYOUT ── */
-        .app{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+/* SIDEBAR */
+.sb{width:268px;flex-shrink:0;background:var(--sb);border-right:1px solid rgba(255,255,255,0.04);display:flex;flex-direction:column;overflow:hidden;z-index:100;transition:transform .28s cubic-bezier(.4,0,.2,1)}
+@media(max-width:900px){.sb{position:absolute;top:0;left:0;bottom:0;transform:translateX(-100%);box-shadow:var(--shl)}.sb.open{transform:translateX(0)}}
+.sbh{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.05);flex-shrink:0}
+.sbh-title{font-size:10px;font-weight:700;color:var(--sbac);text-transform:uppercase;letter-spacing:.12em;margin-bottom:10px}
+.sbh-bar{height:2px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden}
+.sbh-fill{height:100%;background:var(--sbac);border-radius:2px;transition:width .5s ease}
+.sbh-lbl{font-size:10px;color:var(--sbm);margin-top:5px}
+.sb-list{flex:1;overflow-y:auto;padding:5px 0 20px}
+.sb-list::-webkit-scrollbar{width:3px}.sb-list::-webkit-scrollbar-track{background:transparent}.sb-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.07);border-radius:2px}
+.sb-ch{}
+.sb-ch-btn{width:100%;background:none;border:none;cursor:pointer;text-align:left;display:flex;align-items:center;gap:8px;padding:9px 14px;color:var(--sbt);font-family:inherit;font-size:13px;font-weight:500;transition:background .12s;border-left:3px solid transparent}
+.sb-ch-btn:hover{background:var(--sbh)}
+.sb-ch-btn.ach{background:var(--sba);border-left-color:var(--sbac);color:var(--sbac)}
+.sb-chin{font-size:15px;flex-shrink:0}.sb-cnum{font-size:10px;color:var(--sbm);font-weight:700;min-width:20px}
+.sb-ctit{flex:1;line-height:1.3}
+.sb-carr{color:var(--sbm);transition:transform .2s;flex-shrink:0}
+.sb-carr.exp{transform:rotate(90deg)}
+.sb-secs{}
+.sb-sbtn{width:100%;background:none;border:none;cursor:pointer;text-align:left;padding:6px 14px 6px 44px;color:var(--sbm);font-family:inherit;font-size:12px;line-height:1.4;transition:color .12s}
+.sb-sbtn:hover{color:var(--sbt)}.sb-sbtn.ased{color:var(--sbac);font-weight:500}
 
-        /* ── TOPBAR ── */
-        .topbar{
-          height:52px;background:var(--side-bg);display:flex;align-items:center;
-          padding:0 12px;gap:10px;flex-shrink:0;z-index:100;
-          border-bottom:1px solid rgba(255,255,255,0.05);
-        }
-        .tb-logo{font-family:'Merriweather',serif;font-size:14px;color:var(--accent-light);white-space:nowrap;font-weight:700;letter-spacing:0.02em}
-        .tb-logo span{opacity:0.6;font-weight:400}
-        .tb-search{flex:1;position:relative;max-width:360px}
-        .tb-search input{
-          width:100%;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.1);
-          border-radius:6px;padding:6px 10px 6px 30px;color:var(--side-text);font-size:13px;
-          outline:none;font-family:inherit;transition:border 0.15s;
-        }
-        .tb-search input:focus{border-color:rgba(214,165,90,0.4);background:rgba(255,255,255,0.1)}
-        .tb-search input::placeholder{color:var(--side-muted)}
-        .search-ico{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--side-muted);font-size:12px;pointer-events:none}
-        .search-drop{
-          position:absolute;top:calc(100% + 6px);left:0;right:0;
-          background:var(--surface);border:1px solid var(--border);border-radius:8px;
-          box-shadow:var(--shadow-lg);z-index:200;overflow:hidden;
-        }
-        .search-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s}
-        .search-item:hover{background:var(--bg2)}
-        .search-item:last-child{border:none}
-        .si-num{font-size:10px;color:var(--accent);font-weight:700;letter-spacing:0.06em;margin-bottom:2px}
-        .si-title{font-size:13px;color:var(--text);font-weight:500}
-        .si-sub{font-size:11px;color:var(--text2);margin-top:1px}
-        .tb-btn{
-          background:rgba(255,255,255,0.06);border:none;border-radius:6px;width:34px;height:34px;
-          cursor:pointer;color:var(--side-text);font-size:15px;display:flex;align-items:center;justify-content:center;
-          flex-shrink:0;transition:background 0.15s;
-        }
-        .tb-btn:hover{background:rgba(255,255,255,0.12)}
-        .menu-btn{display:none}
-        @media(max-width:768px){.menu-btn{display:flex!important}}
+/* CONTENT */
+.con{flex:1;overflow-y:auto;background:var(--bg);scroll-behavior:smooth}
+.con::-webkit-scrollbar{width:4px}.con::-webkit-scrollbar-track{background:transparent}.con::-webkit-scrollbar-thumb{background:var(--bd);border-radius:4px}
+.cin{max-width:740px;margin:0 auto;padding:0 0 80px}
 
-        /* ── MAIN ── */
-        .main{display:flex;flex:1;overflow:hidden;position:relative}
+/* HERO */
+.hero{background:linear-gradient(135deg,var(--sb) 0%,#2a2318 100%);padding:24px 22px 20px;position:relative;overflow:hidden}
+.hero::after{content:attr(data-icon);position:absolute;right:14px;bottom:-12px;font-size:84px;opacity:.05;line-height:1;pointer-events:none}
+.hero-eye{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--sbac);margin-bottom:5px}
+.hero-h{font-family:'Crimson Pro',serif;font-size:25px;font-weight:700;color:#fff;line-height:1.25;margin-bottom:12px}
+.hero-pills{display:flex;flex-wrap:wrap;gap:6px}
+.hero-p{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);border-radius:20px;padding:3px 11px;font-size:11px;color:rgba(255,255,255,.6);cursor:pointer;transition:all .15s;white-space:nowrap;border:none;font-family:inherit}
+.hero-p:hover,.hero-p.ap{background:rgba(196,138,56,0.2);color:var(--sbac)}
 
-        /* ── SIDEBAR ── */
-        .sidebar{
-          width:270px;background:var(--side-bg);display:flex;flex-direction:column;
-          flex-shrink:0;overflow:hidden;transition:transform 0.26s cubic-bezier(0.4,0,0.2,1);z-index:50;
-        }
-        .side-head{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.06)}
-        .side-label{font-size:10px;font-weight:700;letter-spacing:0.1em;color:var(--side-muted);text-transform:uppercase;margin-bottom:8px}
-        .side-progress{height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden;margin-bottom:4px}
-        .side-bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-light));border-radius:2px;transition:width 0.4s ease}
-        .side-prog-txt{font-size:10px;color:var(--side-muted)}
-        .ch-list{flex:1;overflow-y:auto;padding:6px 0}
-        .ch-list::-webkit-scrollbar{width:3px}
-        .ch-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:2px}
-        .ch-row{cursor:pointer;user-select:none}
-        .ch-label{
-          display:flex;align-items:center;gap:8px;padding:9px 16px;
-          font-size:13px;color:var(--side-text);transition:background 0.12s;
-          border-left:3px solid transparent;
-        }
-        .ch-label:hover{background:var(--side-hover)}
-        .ch-label.active{background:var(--side-active);border-left-color:var(--accent-light);color:var(--accent-light)}
-        .ch-icon{font-size:15px;flex-shrink:0}
-        .ch-num{font-size:9px;color:var(--side-muted);font-weight:700;letter-spacing:0.06em;min-width:20px}
-        .ch-text{flex:1;line-height:1.3;font-size:12.5px}
-        .ch-label.active .ch-text{font-weight:600}
+/* TABS */
+.tabs{display:flex;border-bottom:1px solid var(--bd);background:var(--surf);padding:0 22px;position:sticky;top:0;z-index:10}
+.tab{padding:12px 16px;background:none;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:500;color:var(--tx3);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--tx)}.tab.at{color:var(--acc);border-bottom-color:var(--acc)}
 
-        /* overlay mobile */
-        .overlay{position:absolute;inset:0;background:rgba(0,0,0,0.55);z-index:40;display:none}
-        .overlay.on{display:block}
-        @media(max-width:768px){
-          .sidebar{position:absolute;top:0;left:0;bottom:0;transform:translateX(-100%);box-shadow:4px 0 24px rgba(0,0,0,0.4)}
-          .sidebar.open{transform:translateX(0)}
-        }
+/* MD CONTENT */
+.md{padding:22px 22px 0;font-family:'DM Sans',sans-serif;font-size:15px;line-height:1.85;color:var(--tx2)}
+.md h2{font-family:'Crimson Pro',serif;font-size:22px;font-weight:700;color:var(--tx);margin:28px 0 13px;padding-bottom:8px;border-bottom:2px solid var(--bd);line-height:1.3}
+.md h3{font-family:'Crimson Pro',serif;font-size:17px;font-weight:600;color:var(--acc);margin:20px 0 9px}
+.md p{margin-bottom:12px}.md ul,.md ol{padding-left:22px;margin-bottom:12px}.md li{margin-bottom:5px}
+.md strong{color:var(--tx);font-weight:600}
+.md code{background:var(--bg2);border:1px solid var(--bd);border-radius:4px;padding:1px 6px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--acc)}
+.md blockquote{border-left:3px solid var(--acc2);padding:10px 16px;background:var(--accl);border-radius:0 8px 8px 0;margin:14px 0;color:var(--tx2);font-style:italic}
+.md table{width:100%;border-collapse:collapse;font-size:13.5px;margin:14px 0}
+.md th{background:var(--sb);color:#fff;padding:9px 12px;text-align:left;font-weight:600;font-size:12px}
+.dark .md th{background:rgba(255,255,255,0.07);color:var(--tx)}
+.md td{padding:7px 12px;border-bottom:1px solid var(--bd2);color:var(--tx2)}
+.md tr:nth-child(even) td{background:var(--surf2)}
+.md .math-display{overflow-x:auto;padding:4px 0}
+.katex{color:inherit!important}.katex-display{margin:14px 0!important}
 
-        /* ── CONTENT ── */
-        .content{flex:1;overflow-y:auto;background:var(--bg)}
-        .content::-webkit-scrollbar{width:4px}
-        .content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-        .content-inner{max-width:780px;margin:0 auto;padding:0 0 80px}
+/* NAV */
+.secnav{display:flex;justify-content:space-between;padding:16px 22px;gap:10px}
+.nbtn{display:flex;align-items:center;gap:8px;background:var(--surf);border:1px solid var(--bd);border-radius:10px;padding:10px 14px;cursor:pointer;color:var(--tx2);font-family:inherit;font-size:13px;transition:all .15s;flex:1;max-width:48%}
+.nbtn:disabled{opacity:.3;cursor:default}.nbtn:not(:disabled):hover{border-color:var(--acc);color:var(--acc);background:var(--accl)}
+.nbtn.nr{justify-content:flex-end;text-align:right}
+.nl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--acc2);display:block;margin-bottom:2px}
+.nt{font-size:12px;display:block;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-        /* chapter header */
-        .ch-hero{
-          background:var(--side-bg);padding:24px 20px 20px;position:sticky;top:0;z-index:10;
-          border-bottom:1px solid rgba(255,255,255,0.06);
-        }
-        .hero-meta{font-size:10px;font-weight:700;letter-spacing:0.12em;color:var(--accent-light);opacity:0.8;margin-bottom:6px;text-transform:uppercase}
-        .hero-title{font-family:'Merriweather',serif;font-size:20px;color:var(--side-text);font-weight:700;line-height:1.3}
-        .hero-sub{font-size:12px;color:var(--side-muted);margin-top:4px}
-        @media(max-width:480px){.hero-title{font-size:17px}}
+/* QUIZ */
+.quiz-wrap{background:var(--surf);border:1px solid var(--bd);border-radius:12px;overflow:hidden;margin:4px 22px 22px}
+.quiz-head{background:var(--sb);color:#fff;padding:13px 18px;display:flex;align-items:center;gap:9px;font-family:'Crimson Pro',serif;font-size:16px;font-weight:700}
+.quiz-count{margin-left:auto;background:rgba(255,255,255,0.12);border-radius:12px;padding:2px 10px;font-size:12px;font-family:'DM Sans',sans-serif}
+.quiz-body{padding:2px 0}
+.quiz-q{padding:15px 18px;border-bottom:1px solid var(--bd2);transition:background .2s}
+.quiz-q:last-child{border-bottom:none}
+.q-ok{background:var(--okb)}.q-fail{background:var(--errb)}
+.q-meta{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.q-num{font-size:11px;font-weight:700;color:var(--acc2);text-transform:uppercase;letter-spacing:.06em}
+.q-badge{display:flex;align-items:center;gap:4px;border-radius:12px;padding:2px 9px;font-size:11px;font-weight:600}
+.b-ok{background:var(--okb);color:var(--ok)}.b-fail{background:var(--errb);color:var(--err)}
+.q-text{font-size:14px;font-weight:500;color:var(--tx);margin-bottom:11px;line-height:1.6}
+.q-text p{margin:0}
+.q-opts{display:flex;flex-direction:column;gap:7px}
+.q-opt{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1.5px solid var(--bd);border-radius:8px;cursor:pointer;transition:all .15s;background:var(--surf2)}
+.q-opt input{display:none}
+.q-opt:has(input:not([disabled])):hover{border-color:var(--acc2);background:var(--accl)}
+.q-opt.sel{border-color:var(--acc);background:var(--accl)}
+.q-opt.ok{border-color:var(--ok)!important;background:var(--okb)!important}
+.q-opt.fail{border-color:var(--err)!important;background:var(--errb)!important}
+.opt-dot{width:22px;height:22px;border-radius:50%;background:var(--bg2);border:1.5px solid var(--bd);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--tx3);flex-shrink:0;margin-top:1px}
+.q-opt.ok .opt-dot{background:var(--ok);border-color:var(--ok);color:#fff}
+.q-opt.fail .opt-dot{background:var(--err);border-color:var(--err);color:#fff}
+.q-opt.sel:not(.ok):not(.fail) .opt-dot{background:var(--acc);border-color:var(--acc);color:#fff}
+.opt-label{font-size:13.5px;color:var(--tx2);line-height:1.5;flex:1}
+.opt-label p{margin:0}
+.explain-toggle{margin-top:9px;background:none;border:none;cursor:pointer;font-size:12px;color:var(--acc2);font-family:inherit;font-weight:500}
+.explain-toggle:hover{color:var(--acc)}
+.q-explain{margin-top:8px;padding:10px 14px;background:var(--bg2);border-radius:8px;font-size:13px;color:var(--tx2);line-height:1.6;border-left:3px solid var(--acc2)}
+.q-explain p{margin:0}
+.quiz-foot{padding:15px 18px;border-top:1px solid var(--bd)}
+.btn-nop{width:100%;padding:12px;background:var(--sb);border:none;border-radius:8px;color:#fff;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .15s}
+.light .btn-nop{background:var(--acc)}
+.btn-nop:disabled{opacity:.4;cursor:not-allowed}.btn-nop:not(:disabled):hover{opacity:.85}
+.quiz-result{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.res-score{display:flex;align-items:baseline;gap:3px}
+.rs-n{font-family:'Crimson Pro',serif;font-size:40px;font-weight:700;color:var(--acc);line-height:1}
+.rs-s{font-size:22px;color:var(--tx3)}.rs-t{font-family:'Crimson Pro',serif;font-size:28px;color:var(--tx3)}
+.res-msg{flex:1;font-size:13.5px;color:var(--tx2);min-width:140px}
+.btn-reset{display:flex;align-items:center;gap:6px;background:none;border:1.5px solid var(--bd);border-radius:8px;padding:8px 14px;cursor:pointer;color:var(--tx2);font-family:inherit;font-size:13px;font-weight:500;transition:all .15s}
+.btn-reset:hover{border-color:var(--acc);color:var(--acc)}
 
-        /* tabs */
-        .tabs{display:flex;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:9}
-        .tab-btn{
-          flex:1;padding:11px 4px;font-size:12px;font-weight:500;color:var(--text2);
-          background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;
-          transition:all 0.15s;font-family:inherit;
-        }
-        .tab-btn.on{color:var(--accent);border-bottom-color:var(--accent);background:var(--surface)}
-        .tab-btn:hover:not(.on){background:var(--bg);color:var(--text)}
+/* REFS */
+.refs-body{padding:18px 22px 32px}
+.ref-section{margin-bottom:26px}
+.ref-h{display:flex;align-items:center;gap:8px;font-family:'Crimson Pro',serif;font-size:17px;font-weight:700;color:var(--tx);margin-bottom:13px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
+.ref-row{display:flex;align-items:center;gap:12px;padding:11px 14px;background:var(--surf);border:1px solid var(--bd);border-radius:10px;text-decoration:none;transition:all .15s;margin-bottom:7px}
+.ref-row:hover{border-color:var(--acc2);background:var(--accl)}
+.ref-ic{font-size:20px;flex-shrink:0}.ref-info{flex:1}.ref-name{display:block;font-size:14px;font-weight:500;color:var(--tx);margin-bottom:2px}.ref-cat{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);font-weight:600}.ref-ext{color:var(--acc2);font-size:14px}
+.data-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.data-card{background:var(--surf);border:1px solid var(--bd);border-radius:8px;padding:9px 12px;display:flex;flex-direction:column;gap:3px}
+.data-lbl{font-size:11px;color:var(--tx3);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.data-val{font-size:13px;font-weight:600;color:var(--tx)}
+.link-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.link-card{display:flex;flex-direction:column;gap:3px;padding:11px 14px;background:var(--surf);border:1px solid var(--bd);border-radius:10px;text-decoration:none;transition:all .15s}
+.link-card:hover{border-color:var(--acc2);background:var(--accl)}
+.lc-name{font-size:13px;font-weight:600;color:var(--acc)}
+.lc-desc{font-size:12px;color:var(--tx3)}
 
-        /* article markdown */
-        .article{padding:20px 20px 0;line-height:1.85}
-        .article h2{font-family:'Merriweather',serif;font-size:19px;font-weight:700;color:var(--text);margin:28px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--border)}
-        .article h2:first-child{margin-top:0}
-        .article h3{font-family:'Merriweather',serif;font-size:15px;font-weight:700;color:var(--accent);margin:22px 0 10px}
-        .article h4{font-size:14px;font-weight:600;color:var(--text);margin:16px 0 8px}
-        .article p{font-size:14.5px;color:var(--text2);margin-bottom:12px;line-height:1.85}
-        .article strong{color:var(--text);font-weight:600}
-        .article em{font-style:italic;color:var(--text2)}
-        .article code{background:var(--code-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--accent)}
-        .article blockquote{border-left:3px solid var(--accent);background:var(--math-bg);padding:10px 14px;border-radius:0 8px 8px 0;margin:16px 0;font-size:13.5px;color:var(--text2);font-style:italic}
-        .article hr{border:none;border-top:1px solid var(--border);margin:20px 0}
-        .article ul,.article ol{padding-left:22px;margin:10px 0}
-        .article li{font-size:14.5px;color:var(--text2);margin-bottom:6px;line-height:1.7}
-        .article a{color:var(--accent);text-decoration:underline}
-        .article table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px;overflow:hidden;border-radius:8px;border:1px solid var(--border)}
-        .article thead{background:var(--accent)}
-        .article thead th{color:#fff;padding:8px 12px;text-align:left;font-weight:600}
-        .article tbody tr:nth-child(even){background:var(--bg2)}
-        .article tbody td{padding:7px 12px;border-bottom:1px solid var(--border);color:var(--text2)}
-        .article .math-display{background:var(--math-bg);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;overflow-x:auto}
-        .katex{font-size:1em!important}
-
-        /* nav prev/next */
-        .ch-nav{display:flex;gap:10px;padding:20px}
-        .nav-btn{
-          flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;
-          padding:12px 14px;cursor:pointer;color:var(--text2);font-size:12px;display:flex;
-          align-items:center;gap:8px;transition:all 0.15s;font-family:inherit;box-shadow:var(--shadow);
-        }
-        .nav-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);transform:translateY(-1px);box-shadow:var(--shadow-lg)}
-        .nav-btn:disabled{opacity:0.3;cursor:default}
-        .nav-btn.next{justify-content:flex-end;text-align:right}
-        .nav-icon{font-size:18px;opacity:0.7}
-        .nav-info{display:flex;flex-direction:column}
-        .nav-label{font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text3)}
-        .nav-name{font-size:13px;font-weight:500}
-
-        /* ── QUIZ ── */
-        .quiz-wrap{margin:20px;border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
-        .quiz-top{background:var(--accent);color:#fff;padding:12px 16px;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;font-family:'Merriweather',serif}
-        .quiz-count{margin-left:auto;background:rgba(255,255,255,0.2);border-radius:20px;padding:2px 10px;font-size:11px;font-family:'Inter',sans-serif;font-weight:600}
-        .quiz-body{background:var(--bg)}
-        .q-item{padding:16px;border-bottom:1px solid var(--border);transition:background 0.2s}
-        .q-item:last-child{border:none}
-        .q-correct{background:var(--correct-bg)}
-        .q-wrong{background:var(--wrong-bg)}
-        .q-text{font-size:14px;font-weight:600;color:var(--text);margin-bottom:10px;display:flex;gap:10px;line-height:1.5}
-        .q-num{background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;margin-top:1px}
-        .q-opts{display:flex;flex-direction:column;gap:6px}
-        .q-opt{
-          display:flex;align-items:center;gap:10px;padding:9px 12px;
-          border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-size:13.5px;
-          transition:all 0.15s;color:var(--text2);background:var(--surface);
-        }
-        .q-opt:hover{border-color:var(--border2);color:var(--text)}
-        .q-opt.q-picked{border-color:var(--accent);color:var(--accent);background:rgba(181,98,30,0.06)}
-        .q-opt.q-ans{border-color:var(--correct);color:var(--correct);background:var(--correct-bg)}
-        .q-opt input{position:absolute;opacity:0;pointer-events:none}
-        .q-opt-mark{width:22px;height:22px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;color:var(--text2)}
-        .q-opt.q-picked .q-opt-mark{background:var(--accent);color:#fff}
-        .q-opt.q-ans .q-opt-mark{background:var(--correct);color:#fff}
-        .q-explain{margin-top:10px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;color:var(--text2)}
-        .q-explain-ok{background:var(--correct-bg);border:1px solid rgba(22,101,52,0.2)}
-        .q-explain-err{background:var(--wrong-bg);border:1px solid rgba(153,27,27,0.2)}
-        .quiz-foot{padding:14px 16px;background:var(--surface);border-top:1px solid var(--border)}
-        .btn-submit{width:100%;padding:11px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:background 0.15s}
-        .btn-submit:hover:not(:disabled){background:var(--accent2)}
-        .btn-submit:disabled{opacity:0.4;cursor:default}
-        .quiz-result{display:flex;flex-direction:column;gap:10px}
-        .result-bar-wrap{height:8px;background:var(--bg2);border-radius:4px;overflow:hidden}
-        .result-bar{height:100%;border-radius:4px;transition:width 0.6s ease}
-        .result-info{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-        .result-score{font-family:'Merriweather',serif;font-size:26px;font-weight:700;color:var(--accent)}
-        .result-pct{flex:1;font-size:13px;color:var(--text2)}
-        .btn-reset{padding:7px 16px;background:transparent;border:1.5px solid var(--border2);border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text2);font-family:inherit;transition:all 0.15s}
-        .btn-reset:hover{border-color:var(--accent);color:var(--accent)}
-
-        /* ── REFS ── */
-        .refs-wrap{padding:20px}
-        .refs-title{font-family:'Merriweather',serif;font-size:16px;font-weight:700;color:var(--text);margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid var(--border)}
-        .ref-group{margin-bottom:20px}
-        .ref-group-title{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text3);margin-bottom:10px}
-        .ref-item{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:8px}
-        .ref-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;white-space:nowrap;flex-shrink:0}
-        .ref-data{background:rgba(181,98,30,0.12);color:var(--accent)}
-        .ref-std{background:rgba(59,130,246,0.12);color:#3b82f6}
-        .ref-link{background:rgba(16,185,129,0.12);color:#10b981}
-        .ref-content{flex:1;font-size:12.5px}
-        .ref-content strong{color:var(--text);display:block;margin-bottom:2px}
-        .ref-content p{color:var(--text2);margin:0;line-height:1.4}
-        .ref-content a{color:var(--accent);text-decoration:underline}
-        .ref-value{display:inline-block;background:var(--bg2);border-radius:4px;padding:1px 8px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text2);margin:3px 0 4px}
-
-        /* scrollbar thin */
-        .content{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
-        .ch-list{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.08) transparent}
+@media(max-width:600px){
+  .md{padding:16px 16px 0}.secnav{padding:12px 16px}.quiz-wrap{margin:4px 16px 20px}.refs-body{padding:14px 16px 28px}
+  .hero{padding:18px 16px 16px}.tabs{padding:0 16px}.hero-h{font-size:21px}.tab{font-size:12px;padding:11px 11px}
+  .data-grid,.link-grid{grid-template-columns:1fr}
+  .t-sw{display:none}
+}
       `}</style>
 
-      <div className={`app ${dark ? 'dark' : ''}`}>
-        {/* TOPBAR */}
-        <header className="topbar">
-          <button className="tb-btn menu-btn" onClick={() => setSideOpen(o => !o)}>☰</button>
-          <div className="tb-logo">⚗ Cơ Học Đất <span>| UTC</span></div>
-
-          <div className="tb-search">
-            <span className="search-ico">🔍</span>
-            <input
-              placeholder="Tìm kiếm bài học..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              onBlur={() => setTimeout(() => setSearch(''), 200)}
-            />
-            {dSearch && (
-              <div className="search-drop">
-                {searchResults.length > 0 ? searchResults.slice(0, 6).map(c => (
-                  <div key={c.id} className="search-item" onMouseDown={() => { go(c.id); setSearch('') }}>
-                    <div className="si-num">Chương {c.id}</div>
-                    <div className="si-title">{c.icon} {c.title}</div>
-                    <div className="si-sub">{c.subtitle}</div>
-                  </div>
-                )) : <div className="search-item" style={{color:'var(--text2)',fontSize:13}}>Không tìm thấy kết quả</div>}
-              </div>
-            )}
-          </div>
-
-          <button className="tb-btn" onClick={() => setDark(d => !d)} title="Chế độ sáng/tối">
-            {dark ? '☀️' : '🌙'}
-          </button>
-        </header>
-
-        <div className="main">
-          <div className={`overlay ${sideOpen ? 'on' : ''}`} onClick={() => setSideOpen(false)} />
-
-          {/* SIDEBAR */}
-          <nav className={`sidebar ${sideOpen ? 'open' : ''}`}>
-            <div className="side-head">
-              <div className="side-label">Mục lục</div>
-              <div className="side-progress">
-                <div className="side-bar" style={{ width: `${((activeId - 1) / (CHAPTERS.length - 1)) * 100}%` }} />
-              </div>
-              <div className="side-prog-txt">Chương {activeId} / {CHAPTERS.length}</div>
-            </div>
-            <div className="ch-list">
-              {CHAPTERS.map(ch => (
-                <div key={ch.id} className="ch-row" onClick={() => go(ch.id)}>
-                  <div className={`ch-label ${activeId === ch.id ? 'active' : ''}`}>
-                    <span className="ch-icon">{ch.icon}</span>
-                    <span className="ch-num">{String(ch.id).padStart(2,'0')}</span>
-                    <span className="ch-text">{ch.title}</span>
-                  </div>
+      {/* TOPBAR */}
+      <header className="top">
+        <button className="t-btn mb" onClick={() => setOpen(o=>!o)}>
+          {open ? <Icons.close/> : <Icons.menu/>}
+        </button>
+        <div className="t-logo">Cơ Học Đất <em>UTC</em></div>
+        <div className="t-sp"/>
+        <div className="t-sw">
+          <span className="t-sic"><Icons.search/></span>
+          <input className="t-si" placeholder="Tìm kiếm bài học..."
+            value={search} onChange={e => setSearch(e.target.value)}
+            onBlur={() => setTimeout(() => setSearch(""), 180)}/>
+          {search && (
+            <div className="sd">
+              {results.length > 0 ? results.map((r,i) => (
+                <div key={i} className="sdi" onMouseDown={() => go(r.id)}>
+                  <div className="sdi-ch">{r.chapterIcon} Ch.{r.chapterId} — {r.chapterTitle}</div>
+                  <div className="sdi-s">{r.title}</div>
                 </div>
-              ))}
+              )) : <div className="sd-empty">Không tìm thấy kết quả</div>}
             </div>
-          </nav>
-
-          {/* CONTENT */}
-          <div className="content" ref={contentRef}>
-            <div className="content-inner">
-              {chapter && (
-                <>
-                  {/* hero */}
-                  <div className="ch-hero">
-                    <div className="hero-meta">{chapter.icon} &nbsp; Chương {chapter.id}</div>
-                    <div className="hero-title">{chapter.title}</div>
-                    <div className="hero-sub">{chapter.subtitle}</div>
-                  </div>
-
-                  {/* tabs */}
-                  <div className="tabs">
-                    {[['content','📖 Nội dung'],['quiz',`🎯 Quiz (${chapter.quiz.length} câu)`],['refs','📚 Tham khảo']].map(([k,l]) => (
-                      <button key={k} className={`tab-btn ${tab===k?'on':''}`} onClick={() => setTab(k)}>{l}</button>
-                    ))}
-                  </div>
-
-                  {/* tab content */}
-                  {tab === 'content' && (
-                    <>
-                      <div className="article">
-                        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                          {chapter.content}
-                        </ReactMarkdown>
-                      </div>
-                      <div className="ch-nav">
-                        <button className="nav-btn prev" disabled={!prev} onClick={() => prev && go(prev.id)}>
-                          <span className="nav-icon">←</span>
-                          {prev && <span className="nav-info"><span className="nav-label">Trước</span><span className="nav-name">{prev.title}</span></span>}
-                        </button>
-                        <button className="nav-btn next" disabled={!next} onClick={() => next && go(next.id)}>
-                          {next && <span className="nav-info"><span className="nav-label">Tiếp theo</span><span className="nav-name">{next.title}</span></span>}
-                          <span className="nav-icon">→</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-
-                  {tab === 'quiz' && <Quiz questions={chapter.quiz} key={activeId} />}
-                  {tab === 'refs' && <References refs={chapter.references} />}
-                </>
-              )}
-            </div>
-          </div>
+          )}
         </div>
+        <button className="t-btn" onClick={() => setDark(d=>!d)}>
+          {dark ? <Icons.sun/> : <Icons.moon/>}
+        </button>
+      </header>
+
+      {/* LAYOUT */}
+      <div className="lay">
+        <div className={`ov ${open?'show':''}`} onClick={() => setOpen(false)}/>
+
+        {/* SIDEBAR */}
+        <nav className={`sb ${open?'open':''}`}>
+          <div className="sbh">
+            <div className="sbh-title">Mục lục</div>
+            <div className="sbh-bar"><div className="sbh-fill" style={{width:`${Math.round((idx+1)/ALL_SECTIONS.length*100)}%`}}/></div>
+            <div className="sbh-lbl">Bài {idx+1} / {ALL_SECTIONS.length}</div>
+          </div>
+          <div className="sb-list">
+            {CHAPTERS.map(ch => {
+              const hasAct = ch.sections.some(s => s.id === secId);
+              const isExp = expanded[ch.id];
+              return (
+                <div key={ch.id} className="sb-ch">
+                  <button className={`sb-ch-btn ${hasAct?'ach':''}`} onClick={() => setExpanded(p=>({...p,[ch.id]:!p[ch.id]}))}>
+                    <span className="sb-chin">{ch.icon}</span>
+                    <span className="sb-cnum">{String(ch.id).padStart(2,'0')}</span>
+                    <span className="sb-ctit">{ch.title}</span>
+                    <span className={`sb-carr ${isExp?'exp':''}`}><Icons.chevronR/></span>
+                  </button>
+                  {isExp && (
+                    <div className="sb-secs">
+                      {ch.sections.map(s => (
+                        <button key={s.id} className={`sb-sbtn ${s.id===secId?'ased':''}`} onClick={() => go(s.id)}>
+                          {s.id.replace('-','.')} · {s.title}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </nav>
+
+        {/* MAIN */}
+        <main className="con" ref={ref}>
+          <div className="cin">
+            {chapter && section && (<>
+              <div className="hero" data-icon={chapter.icon}>
+                <div className="hero-eye">Chương {chapter.id}</div>
+                <div className="hero-h">{chapter.title}</div>
+                <div className="hero-pills">
+                  {chapter.sections.map(s => (
+                    <button key={s.id} className={`hero-p ${s.id===secId?'ap':''}`} onClick={() => go(s.id)}>
+                      {s.id.replace('-','.')} {s.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="tabs">
+                <button className={`tab ${tab==='content'?'at':''}`} onClick={()=>setTab('content')}>
+                  <Icons.book/> Bài học
+                </button>
+                <button className={`tab ${tab==='quiz'?'at':''}`} onClick={()=>setTab('quiz')}>
+                  <Icons.quiz/> Kiểm tra ({chapter.quiz.length} câu)
+                </button>
+                <button className={`tab ${tab==='refs'?'at':''}`} onClick={()=>setTab('refs')}>
+                  <Icons.link/> Tham khảo
+                </button>
+              </div>
+
+              {tab === 'content' && (
+                <ReactMarkdown className="md" remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                  {section.content}
+                </ReactMarkdown>
+              )}
+              {tab === 'quiz' && (
+                <div style={{paddingTop:'14px'}}>
+                  <Quiz key={`${chapter.id}-quiz`} questions={chapter.quiz}/>
+                </div>
+              )}
+              {tab === 'refs' && <References refs={chapter.references}/>}
+
+              <div className="secnav">
+                <button className="nbtn" disabled={idx<=0} onClick={()=>go(ALL_SECTIONS[idx-1].id)}>
+                  <Icons.arrowL/>
+                  <div><span className="nl">Trước</span>{idx>0&&<span className="nt">{ALL_SECTIONS[idx-1].title}</span>}</div>
+                </button>
+                <button className="nbtn nr" disabled={idx>=ALL_SECTIONS.length-1} onClick={()=>go(ALL_SECTIONS[idx+1].id)}>
+                  <div><span className="nl">Tiếp theo</span>{idx<ALL_SECTIONS.length-1&&<span className="nt">{ALL_SECTIONS[idx+1].title}</span>}</div>
+                  <Icons.arrowR/>
+                </button>
+              </div>
+            </>)}
+          </div>
+        </main>
       </div>
-    </>
-  )
+    </div>
+  );
 }
